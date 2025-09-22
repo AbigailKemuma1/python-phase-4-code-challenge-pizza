@@ -1,59 +1,104 @@
+# server/models.py
+
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import MetaData
 from sqlalchemy.orm import validates
-from sqlalchemy.ext.associationproxy import association_proxy
-from sqlalchemy_serializer import SerializerMixin
 
-metadata = MetaData(
-    naming_convention={
-        "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
-    }
-)
+db = SQLAlchemy()
 
-db = SQLAlchemy(metadata=metadata)
-
-
-class Restaurant(db.Model, SerializerMixin):
+class Restaurant(db.Model):
     __tablename__ = "restaurants"
 
     id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String)
-    address = db.Column(db.String)
+    name = db.Column(db.String, nullable=False)
+    address = db.Column(db.String, nullable=False)
 
-    # add relationship
+    # relationship to RestaurantPizza
+    restaurant_pizzas = db.relationship(
+        "RestaurantPizza",
+        back_populates="restaurant",
+        cascade="all, delete-orphan"
+    )
 
-    # add serialization rules
+    def to_dict(self, include=None, exclude=None):
+        # include: list of attributes or relationship names to include
+        data = {
+            "id": self.id,
+            "name": self.name,
+            "address": self.address
+        }
+        if include and "restaurant_pizzas" in include:
+            data["restaurant_pizzas"] = [rp.to_dict(include=["pizza"]) for rp in self.restaurant_pizzas]
+        if exclude:
+            for key in exclude:
+                data.pop(key, None)
+        return data
 
-    def __repr__(self):
-        return f"<Restaurant {self.name}>"
 
-
-class Pizza(db.Model, SerializerMixin):
+class Pizza(db.Model):
     __tablename__ = "pizzas"
 
     id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String)
-    ingredients = db.Column(db.String)
+    name = db.Column(db.String, nullable=False)
+    ingredients = db.Column(db.String, nullable=False)
 
-    # add relationship
+    restaurant_pizzas = db.relationship(
+        "RestaurantPizza",
+        back_populates="pizza",
+        cascade="all, delete-orphan"
+    )
 
-    # add serialization rules
+    def to_dict(self, include=None, exclude=None):
+        data = {
+            "id": self.id,
+            "name": self.name,
+            "ingredients": self.ingredients
+        }
+        if include and "restaurant_pizzas" in include:
+            data["restaurant_pizzas"] = [rp.to_dict(include=["restaurant"]) for rp in self.restaurant_pizzas]
+        if exclude:
+            for key in exclude:
+                data.pop(key, None)
+        return data
 
-    def __repr__(self):
-        return f"<Pizza {self.name}, {self.ingredients}>"
 
-
-class RestaurantPizza(db.Model, SerializerMixin):
+class RestaurantPizza(db.Model):
     __tablename__ = "restaurant_pizzas"
 
     id = db.Column(db.Integer, primary_key=True)
     price = db.Column(db.Integer, nullable=False)
+    pizza_id = db.Column(db.Integer, db.ForeignKey("pizzas.id"), nullable=False)
+    restaurant_id = db.Column(db.Integer, db.ForeignKey("restaurants.id"), nullable=False)
 
-    # add relationships
+    pizza = db.relationship("Pizza", back_populates="restaurant_pizzas")
+    restaurant = db.relationship("Restaurant", back_populates="restaurant_pizzas")
 
-    # add serialization rules
+    @validates('price')
+    def validate_price(self, key, price):
+        if price is None:
+            raise ValueError("price must be present")
+        if not isinstance(price, int):
+            # often requests come as JSON numbers -> Python int, but be safe:
+            try:
+                price = int(price)
+            except Exception:
+                raise ValueError("price must be an integer")
+        if price < 1 or price > 30:
+            raise ValueError("price must be between 1 and 30")
+        return price
 
-    # add validation
-
-    def __repr__(self):
-        return f"<RestaurantPizza ${self.price}>"
+    def to_dict(self, include=None, exclude=None):
+        data = {
+            "id": self.id,
+            "price": self.price,
+            "pizza_id": self.pizza_id,
+            "restaurant_id": self.restaurant_id
+        }
+        if include:
+            if "pizza" in include:
+                data["pizza"] = self.pizza.to_dict()
+            if "restaurant" in include:
+                data["restaurant"] = self.restaurant.to_dict()
+        if exclude:
+            for key in exclude:
+                data.pop(key, None)
+        return data
